@@ -1,0 +1,235 @@
+import matplotlib.pyplot as plt
+import pandas as pd
+import pylab as pl
+import numpy as np 
+
+
+## reading in the dataset
+df = pd.read_csv("Clean.csv")
+
+## Removes any empty values 
+# Replace empty values with NaN (missing value)
+nan_value = float("NaN")
+df.replace("", nan_value, inplace=True)
+
+# Drop rows that are entirely empty
+df.dropna(how='all', inplace=True)
+
+#drop columns that are entirely empty 
+df.dropna(how='all', axis=1, inplace=True)
+
+# Reset the indexes after dropping empty rows amd columns
+df.reset_index(drop=True, inplace=True)
+
+viz = df[['Laser Speed ', 'Laser Power ', 'Needle Height ', 'Base Diameter ', 'Needle Spacing ', 'Needle Roughness', 'Needle Groove']]
+
+# Split the data into training and testing sets
+from sklearn.model_selection import train_test_split
+train_x, test_x, train_y, test_y = train_test_split(viz[['Laser Speed ', 'Laser Power ']], viz[['Needle Height ', 'Base Diameter ', 'Needle Spacing ']], test_size=0.2, random_state=42)
+
+## doing the feature scaling so that a runtime error doesn't occur in the gradient descent 
+from sklearn.preprocessing import MinMaxScaler
+import warnings
+
+# Suppress the warnings related to MinMaxScaler
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# Create an instance of the MinMaxScaler
+scaler_x = MinMaxScaler()
+scaler_y = MinMaxScaler()
+
+# Fit the scaler on the training x and y
+scaler_x.fit(train_x)
+scaler_y.fit(train_y)
+
+# Apply scaling to both training and testing x and y
+train_x = scaler_x.transform(train_x)
+test_x = scaler_x.transform(test_x)
+train_y = scaler_y.transform(train_y)
+test_y = scaler_y.transform(test_y)
+
+# cost function being defined 
+def cal_cost(theta, X, y):
+    '''
+    Calculates the cost for given X and Y.
+    theta = Vector of thetas
+    X     = Matrix of features (m rows, n columns)
+    y     = Matrix of target variables (m rows, p columns)
+    
+    where:
+        m is the number of training examples
+        n is the number of features
+        p is the number of target variables (columns in y)
+    '''
+    # number of training examples
+    m = len(y)
+   
+    # calculating the predictions for a specfic target variable 
+    predictions = X.dot(theta)
+    
+    # calculating the cost for the specific target variable 
+    squared_errors = np.square(predictions - y)
+    cost = (1 / (2 * m)) * np.sum(squared_errors)
+    
+    return cost
+
+def gradient_descent(X, y, theta, learning_rate=0.001, iterations=10000):
+    '''
+    X    = Matrix of X with added bias units
+    y    = Matrix of Y with multiple columns
+    
+    Returns the final theta vector and array of cost history over the number of iterations
+    '''
+    # number of training examples 
+    m = len(y)
+
+    # Number of target variables (columns in y) (needle height, base diameter, needle spacing)
+    n = y.shape[1]  
+    
+    # intializing matrices 
+    cost_history = np.zeros((iterations, n))
+    theta_history = np.zeros((iterations, theta.shape[0] , n))
+
+   
+    for i in range(iterations):
+        # Predictions for all target variables
+        predictions = X.dot(theta)  
+        
+        for target_idx in range(n):
+            # selecting a specific target variable (needle height, base diameter, needle spacing)
+            target_variable = y[:, target_idx]
+            
+            # calculating the gradient of the cost function for a specific target variable 
+            # predictions[:, target_idx] (this is the predictions for the specific target variable)
+            gradient_of_cost_function = (1/(2*m)) * (X.T.dot(predictions[:, target_idx] - target_variable))
+        
+            # calculates the theta for the specific target variable 
+            theta[:, target_idx] = theta[:, target_idx] - learning_rate * gradient_of_cost_function.squeeze()
+            
+            # stores the theta in the theta history 
+            theta_history[i, :, target_idx] = theta[:, target_idx]
+
+            # store the cost in the cost history 
+            cost_history[i, target_idx] = cal_cost(theta[:, target_idx], X, target_variable)
+
+     
+    return theta, cost_history, theta_history
+
+
+
+## intializing theta to a random value 
+num_features = train_x.shape[1]
+num_target_variables = train_y.shape[1]
+theta = np.random.randn( num_features +1 , num_target_variables)
+
+##adding a bias term so that the model capture any offset in the data
+# Add a column of ones to train_x for the bias term
+train_x = np.hstack((np.ones((train_x.shape[0], 1)), train_x))
+
+# implementing gradient descent 
+theta, cost_history, theta_history = gradient_descent(train_x, train_y, theta,  learning_rate=0.001, iterations=10000)
+
+# Plotting the cost history to visualize if algorithm is working 
+plt.figure(figsize=(10, 6))
+for target_idx in range(num_target_variables):
+    plt.plot(cost_history[:, target_idx], label=f'Target {target_idx+1}')
+
+plt.xlabel('Iteration')
+plt.ylabel('Cost')
+plt.title('Cost History')
+plt.legend()
+plt.show()
+plt.savefig('cost.png')
+plt.close()
+
+# Plot the theta history to visualize if algorithm is working 
+plt.figure(figsize=(10, 6))
+for feature_idx in range(num_features + 1):
+    for target_idx in range(num_target_variables):
+        plt.plot(theta_history[:, feature_idx, target_idx], label=f'Feature {feature_idx}, Target {target_idx+1}')
+
+plt.xlabel('Iteration')
+plt.ylabel('Theta Value')
+plt.title('Theta History')
+plt.legend()
+plt.savefig('theta.png')
+plt.close()
+
+
+# evaluating the model 
+# initializing matrices 
+# Reshape theta to match the number of features in test_x
+theta = theta[:test_x.shape[1], :]
+
+# Calculate predictions using the adjusted theta and the test_x 
+predictions_per_target = test_x.dot(theta)
+
+# initializing matrices 
+mse_per_target = np.zeros(test_y.shape[1]) 
+rmse_per_target = np.zeros(test_y.shape[1]) 
+r_squared_target = np.zeros(test_y.shape[1]) 
+adjust_r_squared_per_target = np.zeros(test_y.shape[1]) 
+
+# calculating statistical metrics for each target variable 
+for target_idx in range(test_y.shape[1]):
+    # Predictions for the current target variable
+    predictions_target = predictions_per_target[:, target_idx]  
+    
+    # Actual values for the current target variable
+    test_y_target = test_y[:, target_idx] 
+    
+    # Calculate the squared errors between predictions and actual values
+    squared_errors = np.square(predictions_target - test_y_target)
+    
+    # Calculate the Mean Squared Error, Root Mean Squared Error, R^2, and Adjusted R^2 for the current target variable
+    mse_per_target[target_idx] = np.mean(squared_errors)
+    rmse_per_target [target_idx] = np.sqrt(mse_per_target[target_idx])
+    r_squared_target[target_idx] = 1 - (np.sum(np.square(test_y_target- predictions_target)) / np.sum(np.square(test_y_target - np.mean(test_y_target))))
+    n = len(test_y_target)
+    adjust_r_squared_per_target[target_idx] = 1 - ((1-  r_squared_target[target_idx])* (n - 1)) / (n - num_features - 1)
+
+
+# Calculate the average Mean Squared Error, Root Mean Squared Error, R^2, and Adjusted R^2 for all target variables
+average_mse = np.mean(mse_per_target)
+average_rmse = np.mean(rmse_per_target)
+average_r_squared = np.mean(r_squared_target)
+average_adjust_r_squared_per_target = np.mean(adjust_r_squared_per_target)
+
+# Print the average Mean Squared Error, Root Mean Squared Error, R^2, and Adjusted R^2 
+print("Average MSE:", average_mse)
+print("Average RMSE:", average_rmse)
+print("Average R^2:", average_r_squared)
+print("Average Adjusted R^2:", average_adjust_r_squared_per_target )
+print()
+
+# Print the Mean Squared Error, Root Mean Squared Error, R^2, and Adjusted R^2 for each target variable 
+for target_idx in range(test_y.shape[1]):
+    print("MSE for target variable", target_idx + 1, ":", mse_per_target[target_idx])
+    print("RMSE for target variable", target_idx + 1, ":", rmse_per_target[target_idx])
+    print("R^2 for target variable", target_idx + 1, ":", r_squared_target[target_idx])
+    print("Adjusted R-squared for target variable", target_idx + 1, ":",  adjust_r_squared_per_target[target_idx])
+    print()
+
+# Take user inputs
+desired_height = float(input("Enter desired height (micrometers): "))
+desired_diameter = float(input("Enter desired diameter (micrometers): "))
+desired_spacing = float(input("Enter desired spacing (micrometers): "))
+
+# Scale user inputs (target variables)
+scaled_inputs = scaler_y.transform(np.array([[desired_height, desired_diameter, desired_spacing]]))
+
+# does the reverse of dot product to get the independent variables
+predicted_x_scaled= scaled_inputs.dot(np.linalg.pinv(theta))
+
+# Denormalize predictions (indepedent variables)
+predicted_x = scaler_x.inverse_transform(predicted_x_scaled)
+
+# Get the laser speed value from the first row and first column
+predicted_laser_speed = predicted_x[0, 0]  
+
+# Get the laser power value from the first row and second column
+predicted_laser_power = predicted_x[0, 1]  
+
+print()
+print("Predicted Laser Speed:", predicted_laser_speed)
+print("Predicted Laser Power:", predicted_laser_power)
